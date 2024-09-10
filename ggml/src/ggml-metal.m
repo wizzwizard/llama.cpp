@@ -233,8 +233,8 @@ struct ggml_backend_metal_context {
     bool should_capture_next_compute;
 
     // abort ggml_metal_graph_compute if callback returns true
-    ggml_abort_callback abort_callback;
-    void *              abort_callback_data;
+    ggml_abort_callback cb_abort;
+    void *              cb_abort_ctx;
 };
 
 // MSL code
@@ -248,32 +248,32 @@ struct ggml_backend_metal_context {
 @implementation GGMLMetalClass
 @end
 
-static void ggml_metal_default_log_callback(enum ggml_log_level level, const char * msg, void * user_data) {
+static void ggml_metal_default_log_callback(enum ggml_log_level level, const char * msg, void * cb_ctx) {
     fprintf(stderr, "%s", msg);
 
     UNUSED(level);
-    UNUSED(user_data);
+    UNUSED(cb_ctx);
 }
 
-ggml_log_callback ggml_metal_log_callback = ggml_metal_default_log_callback;
-void * ggml_metal_log_user_data = NULL;
+static ggml_log_callback ggml_metal_log_cb     = ggml_metal_default_log_callback;
+static void *            ggml_metal_log_cb_ctx = NULL;
 
 GGML_ATTRIBUTE_FORMAT(2, 3)
 static void ggml_metal_log(enum ggml_log_level level, const char * format, ...){
-    if (ggml_metal_log_callback != NULL) {
+    if (ggml_metal_log_cb != NULL) {
         va_list args;
         va_start(args, format);
         char buffer[128];
         int len = vsnprintf(buffer, 128, format, args);
         if (len < 128) {
-            ggml_metal_log_callback(level, buffer, ggml_metal_log_user_data);
+            ggml_metal_log_cb(level, buffer, ggml_metal_log_cb_ctx);
         } else {
             char* buffer2 = malloc(len+1);
             va_end(args);
             va_start(args, format);
             vsnprintf(buffer2, len+1, format, args);
             buffer2[len] = 0;
-            ggml_metal_log_callback(level, buffer2, ggml_metal_log_user_data);
+            ggml_metal_log_cb(level, buffer2, ggml_metal_log_cb_ctx);
             free(buffer2);
         }
         va_end(args);
@@ -907,7 +907,7 @@ static enum ggml_status ggml_metal_graph_compute(
 
         // always enqueue the first two command buffers
         // enqueue all of the command buffers if we don't need to abort
-        if (cb_idx < 2 || ctx->abort_callback == NULL) {
+        if (cb_idx < 2 || ctx->cb_abort == NULL) {
             [command_buffer enqueue];
         }
     }
@@ -3023,7 +3023,7 @@ static enum ggml_status ggml_metal_graph_compute(
 
         [encoder endEncoding];
 
-        if (cb_idx < 2 || ctx->abort_callback == NULL) {
+        if (cb_idx < 2 || ctx->cb_abort == NULL) {
             [command_buffer commit];
         }
     });
@@ -3055,7 +3055,7 @@ static enum ggml_status ggml_metal_graph_compute(
             continue;
         }
 
-        if (ctx->abort_callback && ctx->abort_callback(ctx->abort_callback_data)) {
+        if (ctx->cb_abort && ctx->cb_abort(ctx->cb_abort_ctx)) {
             GGML_METAL_LOG_INFO("%s: command buffer %d aborted", __func__, i);
             return GGML_STATUS_ABORTED;
         }
@@ -3416,9 +3416,9 @@ static struct ggml_backend_i ggml_backend_metal_i = {
     /* .event_synchronize       = */ NULL,
 };
 
-void ggml_backend_metal_log_set_callback(ggml_log_callback log_callback, void * user_data) {
-    ggml_metal_log_callback  = log_callback;
-    ggml_metal_log_user_data = user_data;
+void ggml_backend_metal_log_set_callback(ggml_log_callback cb, void * cb_ctx) {
+    ggml_metal_log_cb     = cb;
+    ggml_metal_log_cb_ctx = cb_ctx;
 }
 
 static ggml_guid_t ggml_backend_metal_guid(void) {
@@ -3456,13 +3456,13 @@ void ggml_backend_metal_set_n_cb(ggml_backend_t backend, int n_cb) {
     ctx->n_cb = MIN(n_cb, GGML_METAL_MAX_BUFFERS);
 }
 
-void ggml_backend_metal_set_abort_callback(ggml_backend_t backend, ggml_abort_callback abort_callback, void * user_data) {
+void ggml_backend_metal_set_abort_callback(ggml_backend_t backend, ggml_abort_callback cb, void * cb_ctx) {
     GGML_ASSERT(ggml_backend_is_metal(backend));
 
     struct ggml_backend_metal_context * ctx = (struct ggml_backend_metal_context *)backend->context;
 
-    ctx->abort_callback = abort_callback;
-    ctx->abort_callback_data = user_data;
+    ctx->cb_abort     = cb;
+    ctx->cb_abort_ctx = cb_ctx;
 }
 
 bool ggml_backend_metal_supports_family(ggml_backend_t backend, int family) {
@@ -3480,11 +3480,11 @@ void ggml_backend_metal_capture_next_compute(ggml_backend_t backend) {
     ctx->should_capture_next_compute = true;
 }
 
-GGML_CALL ggml_backend_t ggml_backend_reg_metal_init(const char * params, void * user_data); // silence warning
+GGML_CALL ggml_backend_t ggml_backend_reg_metal_init(const char * params, void * cb_ctx); // silence warning
 
-GGML_CALL ggml_backend_t ggml_backend_reg_metal_init(const char * params, void * user_data) {
+GGML_CALL ggml_backend_t ggml_backend_reg_metal_init(const char * params, void * cb_ctx) {
     return ggml_backend_metal_init();
 
     GGML_UNUSED(params);
-    GGML_UNUSED(user_data);
+    GGML_UNUSED(cb_ctx);
 }
