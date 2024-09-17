@@ -686,6 +686,13 @@ gpt_params_context gpt_params_parser_init(gpt_params & params, llama_example ex,
         }
     ));
     add_opt(llama_arg(
+        {"--no-context-shift"},
+        format("disables context shift on inifinite text generation (default: %s)", params.ctx_shift ? "disabled" : "enabled"),
+        [](gpt_params & params) {
+            params.ctx_shift = false;
+        }
+    ).set_examples({LLAMA_EXAMPLE_MAIN}));
+    add_opt(llama_arg(
         {"--chunks"}, "N",
         format("max number of chunks to process (default: %d, -1 = all)", params.n_chunks),
         [](gpt_params & params, int value) {
@@ -1305,7 +1312,7 @@ gpt_params_context gpt_params_parser_init(gpt_params & params, llama_example ex,
         [](gpt_params & params, int value) {
             params.n_parallel = value;
         }
-    ));
+    ).set_env("LLAMA_ARG_N_PARALLEL"));
     add_opt(llama_arg(
         {"-ns", "--sequences"}, "N",
         format("number of sequences to decode (default: %d)", params.n_sequences),
@@ -1985,4 +1992,3 @@ gpt_params_context gpt_params_parser_init(gpt_params & params, llama_example ex,
 
     return ctx_arg;
 }
-
